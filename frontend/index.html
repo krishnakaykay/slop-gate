@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Slop Gate — Pre-Flight Document Review &amp; Owner Sign-Off</title>
+  <link rel="stylesheet" href="/static/css/app.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand" onclick="window.appReset && window.appReset()" role="button" tabindex="0">
+        <span class="brand-mark" aria-hidden="true">✓</span>
+        <span class="brand-name">Slop Gate</span>
+        <span id="modeBadge" class="pill pill-muted">Checking API…</span>
+      </div>
+      <div class="topbar-actions">
+        <div id="stepBreadcrumb" class="breadcrumb" aria-label="Workflow steps"></div>
+        <button id="btnFeedback" class="btn btn-ghost btn-sm" title="Send quick feedback or report a bug">💬 Feedback</button>
+        <button id="btnSettings" class="btn btn-ghost btn-sm" title="Configure Gemini API key & models">⚙ Model &amp; Key</button>
+        <button id="btnTheme" class="btn btn-ghost btn-sm" title="Toggle light/dark theme">◐</button>
+      </div>
+    </div>
+  </header>
+
+  <main id="app" class="container" aria-live="polite"></main>
+
+  <!-- Hidden file inputs for initial upload & in-place v2 re-upload -->
+  <input id="fileInputMain" type="file" accept="application/pdf,.pdf" hidden />
+  <input id="fileInputRev" type="file" accept="application/pdf,.pdf" hidden />
+
+  <!-- Settings Modal (API Key & Model Selection) -->
+  <div id="settingsModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h2 id="settingsTitle">Model &amp; Gemini API Settings</h2>
+        <button id="btnCloseSettings" class="btn btn-ghost btn-sm" aria-label="Close">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="muted small">
+          Paste a Google Gemini API key to run live multimodal analysis (kept only in your browser tab memory and sent via <code>X-Gemini-Api-Key</code> header; never saved to disk). Leave blank to use Local Demo Mode.
+        </p>
+        <label class="field">
+          <span>Gemini API Key (optional override)</span>
+          <input id="inpApiKey" type="password" placeholder="AIza..." autocomplete="off" />
+        </label>
+        <div class="grid-2">
+          <label class="field">
+            <span>Reasoning Model (Pass 2 Audit)</span>
+            <input id="inpModelReasoning" type="text" placeholder="gemini-3.1-pro-preview" list="geminiModelsList" />
+          </label>
+          <label class="field">
+            <span>Fast Model (Pass 1 Ghost-Deck)</span>
+            <input id="inpModelFast" type="text" placeholder="gemini-3-flash-preview" list="geminiModelsList" />
+          </label>
+        </div>
+        <datalist id="geminiModelsList"></datalist>
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+          <button id="btnFetchModels" class="btn btn-ghost btn-sm" type="button">↻ Fetch Models for Key</button>
+          <span id="modelsFetchStatus" class="muted small"></span>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button id="btnClearKey" class="btn btn-ghost btn-sm">Clear Override</button>
+        <button id="btnSaveSettings" class="btn btn-primary btn-sm">Save Settings</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 1-Click Feedback Modal -->
+  <div id="feedbackModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="feedbackTitle">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h2 id="feedbackTitle">Share Quick Feedback</h2>
+        <button id="btnCloseFeedback" class="btn btn-ghost btn-sm" aria-label="Close">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="muted small">Tell us what worked or felt off — helps shape the next iteration. Document contents are never included.</p>
+        <div style="display:flex; gap:8px;">
+          <button id="fbRateUp" type="button" class="choice-pill" onclick="window._modalFeedbackRate('up')">👍 Helpful</button>
+          <button id="fbRateDown" type="button" class="choice-pill" onclick="window._modalFeedbackRate('down')">👎 Needs work</button>
+        </div>
+        <div class="field">
+          <span>Quick tags (optional)</span>
+          <div id="fbModalTags" class="choice-group"></div>
+        </div>
+        <label class="field">
+          <span>Anything specific? (optional)</span>
+          <textarea id="fbModalComment" rows="3" placeholder="e.g., Caught a real contradiction on slide 4, or flagged a false alarm on..."></textarea>
+        </label>
+      </div>
+      <div class="modal-foot">
+        <button id="btnCancelFeedback" class="btn btn-ghost btn-sm" type="button">Close</button>
+        <button id="btnSendFeedback" class="btn btn-primary btn-sm" type="button">Send Feedback</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Optional Beta Access Code Modal (shown only when server sets SLOP_BETA_CODE) -->
+  <div id="betaModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="betaTitle">
+    <div class="modal-card" style="max-width:440px;">
+      <div class="modal-head">
+        <h2 id="betaTitle">Slop Gate Beta Access</h2>
+      </div>
+      <div class="modal-body">
+        <p class="muted small">Enter your beta invite code to use the sponsored Gemini key — or click below to bring your own Gemini API key.</p>
+        <label class="field">
+          <span>Invite Code</span>
+          <input id="inpBetaCode" type="password" placeholder="Enter beta code…" autocomplete="off" />
+        </label>
+        <div id="betaErrorMsg" class="small" style="color:var(--crit); display:none;"></div>
+      </div>
+      <div class="modal-foot">
+        <button id="btnBetaUseOwnKey" class="btn btn-ghost btn-sm" type="button">Use my own Gemini key</button>
+        <button id="btnUnlockBeta" class="btn btn-primary btn-sm" type="button">Unlock Beta</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast notifications -->
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+
+  <script type="module" src="/static/js/app.js?v=4"></script>
+</body>
+</html>

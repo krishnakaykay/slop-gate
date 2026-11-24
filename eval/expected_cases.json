@@ -1,0 +1,138 @@
+[
+  {
+    "id": "slop_01_cloud_deck",
+    "path": "examples/slop/01_slop_deck_cloud_migration.pdf",
+    "doc_format": "slide_deck",
+    "doc_purpose": "decide",
+    "target_persona": "leadership",
+    "allowed_verdicts": ["FIX_CRITICAL_ISSUES", "NEEDS_REWORK"],
+    "expected_contradictions": [
+      {
+        "id": "helios_savings_clash",
+        "categories": ["contradiction"],
+        "severity": "critical",
+        "required_pages": [2, 4],
+        "token_groups": [["2\\.4", "q3"], ["1\\.1"]]
+      },
+      {
+        "id": "helios_chart_clash",
+        "categories": ["contradicts_chart", "contradiction"],
+        "severity": "critical",
+        "required_pages": [4],
+        "token_groups": [["exponential", "flat", "410", "425", "query"]]
+      }
+    ]
+  },
+  {
+    "id": "slop_02_copilot_memo",
+    "path": "examples/slop/02_slop_memo_ai_support_copilot.pdf",
+    "doc_format": "narrative_memo",
+    "doc_purpose": "decide",
+    "target_persona": "leadership",
+    "allowed_verdicts": ["FIX_CRITICAL_ISSUES", "NEEDS_REWORK"],
+    "expected_contradictions": [
+      {
+        "id": "copilot_headcount_clash",
+        "categories": ["contradiction"],
+        "severity": "critical",
+        "required_pages": [1],
+        "token_groups": [["zero", "headcount"], ["2", "engineer", "soc2", "6-month"]]
+      }
+    ]
+  },
+  {
+    "id": "slop_03_cross_org_deck",
+    "path": "examples/slop/03_slop_deck_cross_org_api_deprecation.pdf",
+    "doc_format": "slide_deck",
+    "doc_purpose": "decide",
+    "target_persona": "cross_org",
+    "allowed_verdicts": ["FIX_CRITICAL_ISSUES", "NEEDS_REWORK"],
+    "expected_contradictions": [
+      {
+        "id": "auth_date_clash",
+        "categories": ["contradiction"],
+        "severity": "critical",
+        "required_pages": [2, 5],
+        "token_groups": [["oct", "15"], ["nov", "30"]]
+      }
+    ]
+  },
+  {
+    "id": "sharp_01_cloud_deck",
+    "path": "examples/sharp/01_sharp_deck_cloud_migration.pdf",
+    "doc_format": "slide_deck",
+    "doc_purpose": "decide",
+    "target_persona": "leadership",
+    "allowed_verdicts": ["READY"],
+    "expected_contradictions": []
+  },
+  {
+    "id": "sharp_02_copilot_memo",
+    "path": "examples/sharp/02_sharp_memo_ai_support_copilot.pdf",
+    "doc_format": "narrative_memo",
+    "doc_purpose": "decide",
+    "target_persona": "leadership",
+    "allowed_verdicts": ["READY"],
+    "expected_contradictions": []
+  },
+  {
+    "id": "sharp_03_cross_org_deck",
+    "path": "examples/sharp/03_sharp_deck_cross_org_api_deprecation.pdf",
+    "doc_format": "slide_deck",
+    "doc_purpose": "decide",
+    "target_persona": "cross_org",
+    "allowed_verdicts": ["READY"],
+    "expected_contradictions": []
+  },
+  {
+    "id": "hard_01_smooth_slop",
+    "path": "examples/hard/01_hard_smooth_2026_ai_slop.pdf",
+    "doc_format": "slide_deck",
+    "doc_purpose": "decide",
+    "target_persona": "leadership",
+    "allowed_verdicts": ["FIX_CRITICAL_ISSUES", "NEEDS_REWORK"],
+    "expected_contradictions": []
+  },
+  {
+    "id": "hard_02_messy_rfc",
+    "path": "examples/hard/02_hard_messy_human_genius_rfc.pdf",
+    "doc_format": "narrative_memo",
+    "doc_purpose": "decide",
+    "target_persona": "leadership",
+    "allowed_verdicts": ["READY"],
+    "expected_contradictions": []
+  },
+  {
+    "id": "hard_03_inform_postmortem",
+    "path": "examples/hard/03_hard_inform_only_sev1_postmortem.pdf",
+    "doc_format": "narrative_memo",
+    "doc_purpose": "inform",
+    "target_persona": "leadership",
+    "allowed_verdicts": ["READY"],
+    "expected_contradictions": []
+  },
+  {
+    "id": "hard_04_15p_exec_qbr",
+    "path": "examples/hard/04_hard_15p_exec_deck_appendix_contradiction.pdf",
+    "doc_format": "slide_deck",
+    "doc_purpose": "decide",
+    "target_persona": "leadership",
+    "allowed_verdicts": ["FIX_CRITICAL_ISSUES", "NEEDS_REWORK"],
+    "expected_contradictions": [
+      {
+        "id": "qbr_arr_nrr_clash",
+        "categories": ["contradiction", "contradicts_chart"],
+        "severity": "critical",
+        "required_pages": [2, 14],
+        "token_groups": [["4\\.2", "118"], ["3\\.1", "109", "1\\.1"]]
+      },
+      {
+        "id": "qbr_opex_clash",
+        "categories": ["contradiction"],
+        "severity": "critical",
+        "required_pages": [6, 13],
+        "token_groups": [["zero", "opex", "smb"], ["1\\.44", "variance", "unbudgeted"]]
+      }
+    ]
+  }
+]

@@ -1,0 +1,13 @@
+.git/
+.gitignore
+.venv/
+.pytest_cache/
+.env
+data/
+**/__pycache__/
+**/*.pyc
+*.egg-info/
+.DS_Store
+backend/tests/
+eval/
+examples/*.py
