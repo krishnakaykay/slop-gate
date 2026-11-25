@@ -80,6 +80,10 @@ function esc(s) {
     .replace(/"/g, '&quot;');
 }
 
+function escJs(s) {
+  return esc(String(s ?? '').replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
+}
+
 function showToast(msg) {
   const t = $('toast');
   t.textContent = msg;
@@ -1118,9 +1122,12 @@ function renderIssuesList(r) {
     const isDual = iss.pages.length >= 2 && iss.pages[0] !== iss.pages[1];
     const pageTag = isDual ? `P${iss.pages[0]} ↔ P${iss.pages[1]}` : `P${iss.pages[0]}`;
 
+    const safeId = escJs(iss.id);
+    const safeSev = escJs(iss.severity);
+    const safeDisp = escJs(disp?.status || '');
     return `
       <div class="issue-card ${isSel ? 'selected' : ''} ${disp ? 'resolved' : ''}"
-           onclick="window._selectIssue('${iss.id}', ${iss.pages[0] || 1})">
+           onclick="window._selectIssue('${safeId}', ${Number(iss.pages[0]) || 1})">
         <div class="issue-head">
           <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
             <span class="pill ${isCrit ? 'pill-critical' : 'pill-verify'}" style="font-size:11px;">${isCrit ? '! CRITICAL' : '▲ VERIFY'}</span>
@@ -1128,10 +1135,10 @@ function renderIssuesList(r) {
             <span class="pill pill-muted mono" style="font-size:11px;">${pageTag}</span>
           </div>
           <div style="display:flex; align-items:center; gap:10px;">
-            <button class="link-btn" onclick="event.stopPropagation(); handleIntentionalClick('${iss.id}','${iss.severity}','${disp?.status || ''}')">
+            <button class="link-btn" onclick="event.stopPropagation(); handleIntentionalClick('${safeId}','${safeSev}','${safeDisp}')">
               ${disp?.status === 'intentional' ? '✓ Intentional (Undo)' : 'Intentional'}
             </button>
-            <button class="link-btn" onclick="event.stopPropagation(); setDisposition('${iss.id}','${disp?.status === 'ignored' ? 'clear' : 'ignored'}','Deferred for now')">
+            <button class="link-btn" onclick="event.stopPropagation(); setDisposition('${safeId}','${disp?.status === 'ignored' ? 'clear' : 'ignored'}','Deferred for now')">
               ${disp?.status === 'ignored' ? '✓ Ignored (Undo)' : 'Ignore for now'}
             </button>
           </div>
@@ -1152,11 +1159,11 @@ function renderIssuesList(r) {
             <div class="small" style="font-weight:600;">Why is this Critical flag intentional (or a false alarm)?</div>
             <input id="intentionalInput" type="text" value="${esc(state.intentionalDraft)}"
                    oninput="window._setIntentionalDraft(this.value)"
-                   onkeydown="if(event.key==='Enter') confirmCriticalIntentional('${iss.id}')"
+                   onkeydown="if(event.key==='Enter') confirmCriticalIntentional('${safeId}')"
                    placeholder="e.g., Slide 2 shows non-GAAP headline; Appendix shows GAAP" />
             <div style="display:flex; justify-content:flex-end; gap:8px;">
               <button class="btn btn-ghost btn-sm" onclick="window._cancelIntentional()">Cancel</button>
-              <button class="btn btn-primary btn-sm" onclick="confirmCriticalIntentional('${iss.id}')">Mark Intentional</button>
+              <button class="btn btn-primary btn-sm" onclick="confirmCriticalIntentional('${safeId}')">Mark Intentional</button>
             </div>
           </div>
         ` : ''}
@@ -1429,7 +1436,7 @@ function renderPrep() {
               oncopy="window._capturePrepClip()"
               oncut="window._capturePrepClip()"
               onpaste="window._handleSmartPaste(event)"
-              oninput="window._setPrepDraft('${q.id}', this.value)"
+              oninput="window._setPrepDraft('${escJs(q.id)}', this.value)"
               placeholder="Jot 1–2 rough sentences in your own words — bullet fragments are great…">${esc(draft)}</textarea>
 
             ${state.prepPasteHint ? `<div class="quote-box">${esc(state.prepPasteHint)}</div>` : ''}
@@ -1450,7 +1457,7 @@ function renderPrep() {
 
           <div style="display:flex; justify-content:space-between; align-items:center; padding-top:8px; border-top:1px solid var(--border);">
             <span class="muted small">Rough notes in your own words · No copy-paste of long passages</span>
-            <button class="btn btn-primary btn-sm" onclick="submitPrepAnswer('${q.id}')" ${state.prepBusy ? 'disabled' : ''}>
+            <button class="btn btn-primary btn-sm" onclick="submitPrepAnswer('${escJs(q.id)}')" ${state.prepBusy ? 'disabled' : ''}>
               ${state.prepBusy ? 'Checking…' : (ans.status === 'verified' ? 'Update Note (⌘↵)' : 'Save &amp; Verify (⌘↵)')}
             </button>
           </div>

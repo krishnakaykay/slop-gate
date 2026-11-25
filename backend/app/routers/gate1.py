@@ -55,6 +55,11 @@ async def _run_gate1_background(
         latest_run = await store.get_gate1_run(run_id)
         intent_text = (latest_run["config"].get("creator_intent", "") if latest_run else "") or req.creator_intent
 
+        is_sponsored = not bool((api_key_override or "").strip()) and bool(settings.effective_gemini_key)
+        # Lock model selection to server defaults when using the sponsored key
+        eff_reasoning = settings.llm_model_reasoning if is_sponsored else req.model_reasoning
+        eff_fast = settings.llm_model_fast if is_sponsored else req.model_fast
+
         report = await execute_gate1(
             run_id=run_id,
             session_id=session_id,
@@ -69,8 +74,8 @@ async def _run_gate1_background(
             creator_intent=intent_text,
             ghost_deck_mode=rev_data["ghost_deck_mode"],
             api_key_override=api_key_override,
-            model_reasoning=req.model_reasoning,
-            model_fast=req.model_fast,
+            model_reasoning=eff_reasoning,
+            model_fast=eff_fast,
             on_progress=on_progress,
         )
 
@@ -88,7 +93,7 @@ async def _run_gate1_background(
             prompt_tokens=report.usage.prompt_tokens,
             output_tokens=report.usage.output_tokens,
             thoughts_tokens=report.usage.thoughts_tokens,
-            model=req.model_reasoning or settings.llm_model_reasoning,
+            model=eff_reasoning or settings.llm_model_reasoning,
         ) if report.mode == "live_gemini" else 0.0
         await log_event(
             event="gate1_completed",
@@ -99,6 +104,7 @@ async def _run_gate1_background(
             user_hash=user_hash,
             payload={
                 "run_id": run_id,
+                "sponsored": is_sponsored,
                 "mode": report.mode,
                 "verdict": report.verdict,
                 "doc_format": report.doc_format,

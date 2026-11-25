@@ -140,3 +140,75 @@ async def test_beta_code_and_daily_sponsored_quota_guardrails(
             json={"revision": 1, "doc_format": "narrative_memo", "doc_purpose": "decide", "target_persona": "leadership"},
         )
         assert r_quota.status_code == 429
+
+
+@pytest.mark.asyncio
+async def test_security_headers_pdf_magic_gate2_bypass_and_global_usd_cap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.services.telemetry import rate_limiter
+
+    rate_limiter.reset()
+    test_store = SessionStore(db_path=tmp_path / "sec.db", sessions_dir=tmp_path / "sessions")
+    await test_store.init()
+    for mod in (
+        "app.services.session_store.store",
+        "app.routers.documents.store",
+        "app.routers.gate1.store",
+        "app.routers.gate2.store",
+    ):
+        monkeypatch.setattr(mod, test_store)
+    monkeypatch.setattr("app.config.settings.slop_beta_code", "")
+    monkeypatch.setattr("app.config.settings.gemini_api_key", "fake-sponsored-key")
+    monkeypatch.setattr("app.config.settings.slop_global_daily_usd_cap", 0.50)
+    monkeypatch.setattr("app.config.settings.slop_daily_run_limit_per_ip", 10)
+    monkeypatch.setattr("app.config.settings.slop_json_logs", False)
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        # 1. Security headers present & /docs disabled by default
+        r_idx = await client.get("/")
+        assert r_idx.status_code == 200
+        assert r_idx.headers["x-content-type-options"] == "nosniff"
+        assert r_idx.headers["x-frame-options"] == "DENY"
+        assert "default-src 'self'" in r_idx.headers["content-security-policy"]
+        assert "access-control-allow-origin" not in r_idx.headers
+        assert (await client.get("/docs")).status_code == 404
+        assert (await client.get("/openapi.json")).status_code == 404
+
+        # 2. /api/models without BYOK returns server_defaults without calling Gemini
+        r_mod = await client.get("/api/models")
+        assert r_mod.status_code == 200
+        assert r_mod.json()["source"] == "server_defaults"
+
+        # 3. Non-PDF disguised with .pdf filename is rejected by %PDF- magic header check
+        r_bad = await client.post(
+            "/api/documents",
+            files={"file": ("evil.pdf", b"<html><script>alert(1)</script></html>", "application/pdf")},
+        )
+        assert r_bad.status_code == 400
+
+        # 4. Gate 2 cannot bypass Gate 1 when using sponsored key
+        r_ok = await client.post("/api/documents/sample/sharp_memo_copilot")
+        assert r_ok.status_code == 200
+        sid = r_ok.json()["session_id"]
+        assert len(sid) == 24  # 96-bit unguessable session id
+
+        r_g2_bypass = await client.post(f"/api/sessions/{sid}/gate2/start", json={"revision": 1})
+        assert r_g2_bypass.status_code == 400
+
+        # 5. Global daily USD cap blocks sponsored runs from ANY IP once crossed
+        await test_store.record_telemetry_event(
+            severity="INFO",
+            event="gate1_completed",
+            source="backend",
+            user_hash="otheruser123",
+            payload={"sponsored": True, "est_cost_usd": 0.65},
+        )
+        r_cap = await client.post(
+            f"/api/sessions/{sid}/gate1/runs",
+            json={"revision": 1, "doc_format": "narrative_memo", "doc_purpose": "decide", "target_persona": "leadership"},
+        )
+        assert r_cap.status_code == 429
+        assert "budget" in r_cap.json()["detail"].lower()
+

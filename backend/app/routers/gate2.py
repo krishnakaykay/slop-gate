@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 
+from app.config import settings
 from app.schemas.gate2 import Gate2AnswerRequest, Gate2StartRequest, Gate2StateResponse
 from app.services.gate2_engine import (
     build_gate2_response,
@@ -24,14 +25,26 @@ async def start_gate2(
     x_gemini_api_key: str | None = Header(default=None),
     x_beta_code: str | None = Header(default=None),
 ) -> Gate2StateResponse:
-    user_hash = await enforce_sponsored_access(request=request, x_gemini_api_key=x_gemini_api_key, x_beta_code=x_beta_code)
+    user_hash = await enforce_sponsored_access(
+        request=request,
+        x_gemini_api_key=x_gemini_api_key,
+        x_beta_code=x_beta_code,
+        check_daily_quota=True,
+    )
     rev_data = await store.get_revision(session_id, req.revision)
     if not rev_data:
         raise HTTPException(status_code=404, detail="Session or revision not found.")
     revision = int(rev_data["revision"])
 
+    is_sponsored = not bool((x_gemini_api_key or "").strip()) and bool(settings.effective_gemini_key)
+
     # Enforce user rule: all non-Polish Gate 1 issues must be resolved (fixed, Intentional, or Ignore for now)
     gate1_report = await store.get_latest_gate1_report(session_id, revision)
+    if is_sponsored and gate1_report is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Complete the Pre-Flight Check before starting Meeting Q&A Prep.",
+        )
     if gate1_report:
         unresolved = [i for i in gate1_report.issues if i.disposition is None]
         if unresolved:
@@ -60,6 +73,7 @@ async def start_gate2(
     target_persona = gate1_report.target_persona if gate1_report else "leadership"
     custom_audience = gate1_report.custom_audience if gate1_report else ""
 
+    eff_reasoning = settings.llm_model_reasoning if is_sponsored else req.model_reasoning
     mode, questions, answers, preserved_count = await start_or_resume_gate2(
         session_id=session_id,
         revision=revision,
@@ -73,7 +87,7 @@ async def start_gate2(
         prior_verified_answers=prior_verified,
         gate1_report=gate1_report,
         api_key_override=x_gemini_api_key,
-        model_reasoning=req.model_reasoning,
+        model_reasoning=eff_reasoning,
     )
 
     await store.save_gate2_session(
@@ -84,6 +98,7 @@ async def start_gate2(
         answers=answers,
         preserved_count=preserved_count,
     )
+    est_g2_usd = 0.045 if (mode == "live_gemini" and is_sponsored) else 0.0
     await log_event(
         event="gate2_started",
         source="backend",
@@ -92,9 +107,11 @@ async def start_gate2(
         stage="prep",
         user_hash=user_hash,
         payload={
+            "sponsored": is_sponsored,
             "mode": mode,
             "question_count": len(questions),
             "preserved_count": preserved_count,
+            "est_cost_usd": est_g2_usd,
         },
     )
     return build_gate2_response(
@@ -142,7 +159,12 @@ async def submit_gate2_answer(
     x_gemini_api_key: str | None = Header(default=None),
     x_beta_code: str | None = Header(default=None),
 ) -> Gate2StateResponse:
-    user_hash = await enforce_sponsored_access(request=request, x_gemini_api_key=x_gemini_api_key, x_beta_code=x_beta_code)
+    user_hash = await enforce_sponsored_access(
+        request=request,
+        x_gemini_api_key=x_gemini_api_key,
+        x_beta_code=x_beta_code,
+        check_gate2_answer_quota=True,
+    )
     rev_data = await store.get_revision(session_id, req.revision)
     if not rev_data:
         raise HTTPException(status_code=404, detail="Session or revision not found.")
@@ -156,6 +178,8 @@ async def submit_gate2_answer(
     if not target_q:
         raise HTTPException(status_code=404, detail=f"Question '{req.question_id}' not found.")
 
+    is_sponsored = not bool((x_gemini_api_key or "").strip()) and bool(settings.effective_gemini_key)
+    eff_fast = settings.llm_model_fast if is_sponsored else req.model_fast
     prior_attempts = answers[req.question_id].attempts if req.question_id in answers else 0
     evaluated = await evaluate_gate2_answer(
         question=target_q,
@@ -163,7 +187,7 @@ async def submit_gate2_answer(
         prior_attempts=prior_attempts,
         pages=rev_data["pages"],
         api_key_override=x_gemini_api_key,
-        model_fast=req.model_fast,
+        model_fast=eff_fast,
     )
     answers[req.question_id] = evaluated
 
@@ -185,6 +209,7 @@ async def submit_gate2_answer(
             feedback=evaluated.feedback,
         )
 
+    est_ans_usd = 0.004 if (existing["mode"] == "live_gemini" and is_sponsored) else 0.0
     await log_event(
         event="gate2_answer_submitted",
         source="backend",
@@ -193,11 +218,13 @@ async def submit_gate2_answer(
         stage="prep",
         user_hash=user_hash,
         payload={
+            "sponsored": is_sponsored,
             "question_id": req.question_id,
             "is_limitation": target_q.is_limitation,
             "status": evaluated.status,
             "attempts": evaluated.attempts,
             "answer_len": len(req.answer_text.strip()),
+            "est_cost_usd": est_ans_usd,
         },
     )
 

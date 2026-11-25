@@ -38,12 +38,18 @@ class Settings(BaseSettings):
     llm_timeout_seconds: int = 120
     llm_inline_max_bytes: int = 15 * 1024 * 1024  # 15 MB guard (Gemini inline limit is 20 MB)
 
-    # Sponsored public-beta guardrails & telemetry (Cloud Run ready)
-    slop_beta_code: str = ""              # Optional invite code; empty = open access
-    slop_daily_run_limit_per_ip: int = 15 # Max sponsored live runs / 24h per IP (0 = unlimited; BYOK bypasses)
-    slop_admin_token: str = ""            # Required to read GET /api/admin/telemetry
+    # Sponsored public-beta guardrails, security & telemetry (Cloud Run ready)
+    slop_beta_code: str = ""                    # Optional invite code; empty = open access
+    slop_daily_run_limit_per_ip: int = 5        # Max sponsored live Gate 1 runs / 24h per IP (0 = unlimited; BYOK bypasses)
+    slop_daily_gate2_answer_limit_per_ip: int = 30  # Max sponsored Gate 2 answer gradings / 24h per IP
+    slop_global_daily_run_limit: int = 60       # Hard global sponsored Gate 1 run cap / 24h across ALL IPs (0 = unlimited)
+    slop_global_daily_usd_cap: float = 10.0     # Hard global estimated sponsored Gemini USD cap / 24h (0 = unlimited)
+    slop_max_storage_mb: int = 300              # Cap /tmp session storage so Cloud Run RAM-backed tmpfs cannot OOM
+    slop_allowed_origins: str = ""              # Comma-separated CORS origins; empty = same-origin only (no wildcard)
+    slop_expose_docs: bool = False              # Disable /docs and /openapi.json in production by default
+    slop_admin_token: str = ""                  # Required to read GET /api/admin/telemetry
     slop_log_salt: str = "slop-gate-beta-v1"
-    slop_json_logs: bool = True           # Emit Cloud Logging-compatible JSON lines to stdout
+    slop_json_logs: bool = True                 # Emit Cloud Logging-compatible JSON lines to stdout
 
     @property
     def effective_gemini_key(self) -> str:

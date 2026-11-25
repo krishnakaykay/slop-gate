@@ -12,7 +12,13 @@ from app.schemas.telemetry import (
     FeedbackResponse,
 )
 from app.services import session_store
-from app.services.telemetry import emit_cloud_json_log, extract_user_hash, log_event
+from app.services.telemetry import (
+    constant_time_equals,
+    emit_cloud_json_log,
+    enforce_rate_limit,
+    extract_user_hash,
+    log_event,
+)
 
 router = APIRouter(prefix="/api", tags=["telemetry"])
 
@@ -20,7 +26,13 @@ router = APIRouter(prefix="/api", tags=["telemetry"])
 @router.post("/telemetry/event")
 async def ingest_client_event(req: ClientEventRequest, request: Request) -> dict[str, bool]:
     """Capture frontend behavioral telemetry and client-side JS errors."""
-    user_hash = extract_user_hash(request)
+    user_hash = enforce_rate_limit(
+        request=request,
+        bucket="telemetry_event",
+        limit=120,
+        window_seconds=60.0,
+        detail="Telemetry rate limit exceeded.",
+    )
     # Keep payload bounded so client events cannot bloat logs/SQLite
     safe_payload: dict[str, object] = {}
     for k, v in list((req.payload or {}).items())[:20]:
@@ -47,7 +59,13 @@ async def ingest_client_event(req: ClientEventRequest, request: Request) -> dict
 @router.post("/feedback", response_model=FeedbackResponse)
 async def submit_feedback(req: FeedbackRequest, request: Request) -> FeedbackResponse:
     """Capture 1-click 👍/👎 ratings, quick tags, and optional user comments."""
-    user_hash = extract_user_hash(request)
+    user_hash = enforce_rate_limit(
+        request=request,
+        bucket="user_feedback",
+        limit=30,
+        window_seconds=3600.0,
+        detail="Too many feedback submissions this hour. Thank you!",
+    )
     clean_tags = [str(t).strip()[:40] for t in (req.tags or []) if str(t).strip()][:10]
     clean_comment = (req.comment or "").strip()[:2000]
     safe_context = {str(k)[:48]: str(v)[:200] for k, v in list((req.context or {}).items())[:12]}
@@ -101,8 +119,14 @@ async def verify_beta_code(req: BetaVerifyRequest, request: Request) -> dict[str
     required = (settings.slop_beta_code or "").strip()
     if not required:
         return {"ok": True, "required": False}
-    user_hash = extract_user_hash(request)
-    if req.code.strip() != required:
+    user_hash = enforce_rate_limit(
+        request=request,
+        bucket="beta_verify",
+        limit=10,
+        window_seconds=300.0,
+        detail="Too many invite code attempts. Please wait 5 minutes.",
+    )
+    if not constant_time_equals(req.code.strip(), required):
         await log_event(
             event="beta_code_verify_failed",
             severity="WARNING",
@@ -125,6 +149,6 @@ async def get_admin_telemetry(
     if not configured:
         raise HTTPException(status_code=404, detail="Admin telemetry endpoint is disabled (set SLOP_ADMIN_TOKEN to enable).")
     provided = (x_admin_token or token or "").strip()
-    if provided != configured:
+    if not provided or not constant_time_equals(provided, configured):
         raise HTTPException(status_code=403, detail="Invalid admin token.")
     return await session_store.store.get_telemetry_summary(limit=limit)

@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import secrets
 import shutil
-import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, File, Header, HTTPException, Query, Request, UploadFile
@@ -14,7 +14,7 @@ from app.config import settings
 from app.schemas.document import DocumentPreScanResponse, SampleInfo
 from app.services.pdf_ingest import IngestionError, compute_revision_diff, ingest_pdf_sync
 from app.services.session_store import store
-from app.services.telemetry import enforce_sponsored_access, log_event
+from app.services.telemetry import enforce_rate_limit, enforce_sponsored_access, log_event
 
 router = APIRouter(prefix="/api", tags=["documents"])
 
@@ -148,8 +148,31 @@ def _build_prescan_response(
     )
 
 
+async def _read_upload_bounded(file: UploadFile) -> bytes:
+    """Read uploaded PDF with a hard byte ceiling and PDF magic-header check before ingestion."""
+    max_bytes = settings.max_file_size_mb * 1024 * 1024
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File exceeds {settings.max_file_size_mb} MB upload limit.",
+            )
+        chunks.append(chunk)
+    data = b"".join(chunks)
+    if len(data) < 5 or not data[:1024].lstrip().startswith(b"%PDF-"):
+        raise HTTPException(status_code=400, detail="Uploaded file is not a valid PDF document.")
+    return data
+
+
 async def _ingest_new_session(pdf_bytes: bytes, filename: str) -> DocumentPreScanResponse:
-    session_id = uuid.uuid4().hex[:12]
+    await store.enforce_storage_budget()
+    session_id = secrets.token_hex(12)
     rev_dir = store.revision_dir(session_id, 1)
     async with _ingest_semaphore:
         try:
@@ -190,6 +213,13 @@ async def load_sample_document(
     x_gemini_api_key: str | None = Header(default=None),
     x_beta_code: str | None = Header(default=None),
 ) -> DocumentPreScanResponse:
+    enforce_rate_limit(
+        request=request,
+        bucket="upload_doc",
+        limit=25,
+        window_seconds=3600.0,
+        detail="Too many document uploads this hour. Please wait a bit before uploading more.",
+    )
     user_hash = await enforce_sponsored_access(request=request, x_gemini_api_key=x_gemini_api_key, x_beta_code=x_beta_code)
     sample = next((s for s in CALIBRATION_SAMPLES if s.id == sample_id), None)
     if not sample:
@@ -224,11 +254,18 @@ async def upload_document(
     x_gemini_api_key: str | None = Header(default=None),
     x_beta_code: str | None = Header(default=None),
 ) -> DocumentPreScanResponse:
+    enforce_rate_limit(
+        request=request,
+        bucket="upload_doc",
+        limit=25,
+        window_seconds=3600.0,
+        detail="Too many document uploads this hour. Please wait a bit before uploading more.",
+    )
     user_hash = await enforce_sponsored_access(request=request, x_gemini_api_key=x_gemini_api_key, x_beta_code=x_beta_code)
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only .pdf files are supported.")
-    pdf_bytes = await file.read()
-    resp = await _ingest_new_session(pdf_bytes, file.filename)
+    pdf_bytes = await _read_upload_bounded(file)
+    resp = await _ingest_new_session(pdf_bytes, Path(file.filename).name)
     await log_event(
         event="doc_uploaded",
         source="backend",
@@ -254,6 +291,13 @@ async def upload_revision(
     x_gemini_api_key: str | None = Header(default=None),
     x_beta_code: str | None = Header(default=None),
 ) -> DocumentPreScanResponse:
+    enforce_rate_limit(
+        request=request,
+        bucket="upload_doc",
+        limit=25,
+        window_seconds=3600.0,
+        detail="Too many document uploads this hour. Please wait a bit before uploading more.",
+    )
     user_hash = await enforce_sponsored_access(request=request, x_gemini_api_key=x_gemini_api_key, x_beta_code=x_beta_code)
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only .pdf files are supported.")
@@ -264,7 +308,8 @@ async def upload_revision(
     prev_rev = int(prev["revision"])
     new_rev = prev_rev + 1
     rev_dir = store.revision_dir(session_id, new_rev)
-    pdf_bytes = await file.read()
+    pdf_bytes = await _read_upload_bounded(file)
+    await store.enforce_storage_budget()
 
     async with _ingest_semaphore:
         try:

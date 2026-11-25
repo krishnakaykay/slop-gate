@@ -5,11 +5,14 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import shutil
 import time
 import uuid
 from pathlib import Path
 from typing import Any
+
+SESSION_ID_RE = re.compile(r"^[a-f0-9]{12,32}$")
 
 import aiosqlite
 
@@ -158,6 +161,8 @@ class SessionStore:
         return aiosqlite.connect(self.db_path)
 
     def revision_dir(self, session_id: str, revision: int) -> Path:
+        if not SESSION_ID_RE.match(session_id) or revision < 1 or revision > 9999:
+            raise ValueError("Invalid session_id or revision.")
         return self.sessions_dir / session_id / f"rev_{revision}"
 
     def stamped_pdf_path(self, session_id: str, revision: int) -> Path:
@@ -653,17 +658,83 @@ class SessionStore:
             await db.commit()
             return int(cur.lastrowid or 0)
 
-    async def count_recent_events(self, *, event: str, user_hash: str, since_ts: float) -> int:
+    async def count_recent_events(
+        self,
+        *,
+        event: str,
+        user_hash: str | None = None,
+        since_ts: float,
+    ) -> int:
+        async with self._connect() as db:
+            if user_hash is not None:
+                query = "SELECT COUNT(*) FROM telemetry_events WHERE event = ? AND user_hash = ? AND created_at >= ?"
+                params: tuple[Any, ...] = (event, user_hash, since_ts)
+            else:
+                query = "SELECT COUNT(*) FROM telemetry_events WHERE event = ? AND created_at >= ?"
+                params = (event, since_ts)
+            async with db.execute(query, params) as cur:
+                row = await cur.fetchone()
+                return int(row[0]) if row else 0
+
+    async def sum_recent_sponsored_usd(self, *, since_ts: float) -> float:
+        """Sum estimated USD across all sponsored Gemini events in the recent window."""
         async with self._connect() as db:
             async with db.execute(
                 """
-                SELECT COUNT(*) FROM telemetry_events
-                WHERE event = ? AND user_hash = ? AND created_at >= ?
+                SELECT payload_json FROM telemetry_events
+                WHERE created_at >= ? AND event IN ('gate1_completed', 'gate2_started', 'gate2_answer_submitted')
                 """,
-                (event, user_hash, since_ts),
+                (since_ts,),
             ) as cur:
-                row = await cur.fetchone()
-                return int(row[0]) if row else 0
+                total = 0.0
+                for (raw,) in await cur.fetchall():
+                    try:
+                        data = json.loads(raw or "{}")
+                        if data.get("sponsored", True):
+                            total += float(data.get("est_cost_usd") or 0.0)
+                    except Exception:
+                        continue
+                return round(total, 5)
+
+    async def enforce_storage_budget(self, max_mb: int | None = None) -> int:
+        """Evict oldest idle sessions if sessions_dir exceeds max_mb (protects Cloud Run tmpfs RAM)."""
+        limit_bytes = max(32, int(max_mb or settings.slop_max_storage_mb)) * 1024 * 1024
+        if not self.sessions_dir.exists():
+            return 0
+
+        def _dir_size(path: Path) -> int:
+            total = 0
+            for root, _dirs, files in os.walk(path):
+                for fname in files:
+                    try:
+                        total += (Path(root) / fname).stat().st_size
+                    except OSError:
+                        pass
+            return total
+
+        cur_bytes = await asyncio.to_thread(_dir_size, self.sessions_dir)
+        if cur_bytes <= limit_bytes:
+            return 0
+
+        evicted = 0
+        async with self._connect() as db:
+            await db.execute("PRAGMA foreign_keys=ON;")
+            await db.execute("PRAGMA busy_timeout=5000;")
+            async with db.execute(
+                "SELECT session_id FROM sessions WHERE active_run_count = 0 ORDER BY last_accessed_at ASC LIMIT 50"
+            ) as cur:
+                candidates = [row[0] for row in await cur.fetchall()]
+            for sid in candidates:
+                if cur_bytes <= int(limit_bytes * 0.75):
+                    break
+                sdir = self.sessions_dir / sid
+                s_bytes = await asyncio.to_thread(_dir_size, sdir) if sdir.exists() else 0
+                await db.execute("DELETE FROM sessions WHERE session_id = ?", (sid,))
+                shutil.rmtree(sdir, ignore_errors=True)
+                cur_bytes = max(0, cur_bytes - s_bytes)
+                evicted += 1
+            await db.commit()
+        return evicted
 
     async def upsert_user_feedback(
         self,
@@ -772,9 +843,11 @@ class SessionStore:
                 for ev in recent_events:
                     ev.pop("payload_json", None)
 
+            spent_24h = await self.sum_recent_sponsored_usd(since_ts=time.time() - 86400.0)
             return {
                 "unique_users": unique_users,
                 "unique_sessions": unique_sessions,
+                "estimated_sponsored_usd_24h": spent_24h,
                 "event_counts": event_counts,
                 "feedback_count": len(feedback_rows),
                 "feedback": feedback_rows,
